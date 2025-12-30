@@ -1,0 +1,10 @@
+.env
+*.pyc
+*.jpg
+*.png
+*.gif
+*.db
+modelscope_session.json
+data/modelscope_session.json
+/data/hooks/hooks.json
+!/assets/memes/**
