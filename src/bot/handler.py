@@ -1401,24 +1401,9 @@ class GameHandler:
         if not is_reply_mode_active:
             # Check context (Current message is already at index -1, so we look at -2)
             context = self._get_context(group_id, limit=2)
-            if len(context) >= 2:
-                prev_msg = context[-2]
-                curr_msg = context[-1]
-                self_id = getattr(self, 'self_id', 0)
-                
-                # If previous message was mine
-                if str(prev_msg.get('sender_id')) == str(self_id):
-                    # Call Secondary Model
-                    is_relevant = await llm_service.check_relevance(prev_msg.get('content',''), curr_msg.get('content',''))
-                    if is_relevant:
-                        # 只有在有主动回复权限时，才允许基于相关性激活回复模式
-                        if await self._check_proactive_permission(group_id, user_id):
-                            print(f"[Handler] Relevance check PASSED. Reactivating Reply Mode for Group {group_id}.")
-                            self._activate_reply_mode(group_id, is_group=is_group)
-                            # Explicitly ensure 3s timer is NOT triggered yet, to allow natural wait
-                            self._reply_mode_states[group_id]['timer_3s_triggered'] = False
-                        else:
-                            print(f"[Handler] Relevance check passed BUT Proactive Reply disabled. Ignoring.", flush=True)
+            # (Relevance check logic removed as it was deprecated/broken)
+
+        # 4. Check Direct Reply Condition
 
         # 4. Check Direct Reply Condition
         # If quiet mode is active, check if we should break out of it

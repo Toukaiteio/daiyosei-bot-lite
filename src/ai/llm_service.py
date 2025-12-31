@@ -310,8 +310,6 @@ class LLMService:
             "看图": "look_at_image",
             "图片": "look_at_image",
             "image": "look_at_image",
-            "回忆": "recall_knowledge",
-            "知识": "recall_knowledge",
             "抓取": "fetch_page",
             "fetch": "fetch_page",
             "at": "AT",
@@ -342,84 +340,8 @@ class LLMService:
                 else:
                     arguments = {"image_url": ""}
                     
-            elif normalized_tool in ["search_web", "fetch_page", "recall_knowledge"]:
+            elif normalized_tool in ["search_web", "fetch_page"]:
                 arguments = {"query": args[0] if args else ""}
-                
-            elif normalized_tool == "learn_knowledge":
-                arguments = {"knowledge": args[0] if args else ""}
-                
-            elif normalized_tool == "view_chat_history":
-                if args:
-                    try:
-                        arguments = {"user_id": int(args[0])}
-                        if len(args) > 1:
-                            arguments["limit"] = int(args[1])
-                    except ValueError:
-                        error_msg = f"Tool '{normalized_tool}' parameter 'user_id' must be an integer."
-                else:
-                    error_msg = f"Tool '{normalized_tool}' requires 'user_id' parameter."
-                    
-            elif normalized_tool == "remember_user_fact":
-                if len(args) >= 2:
-                    try:
-                        arguments = {
-                            "user_id": int(args[0]),
-                            "fact": args[1]
-                        }
-                    except ValueError:
-                        error_msg = f"Tool '{normalized_tool}' parameter 'user_id' must be an integer."
-                else:
-                    error_msg = f"Tool '{normalized_tool}' requires 'user_id' and 'fact' parameters."
-                    
-            elif normalized_tool == "update_user_memory":
-                if len(args) >= 3:
-                    try:
-                        arguments = {
-                            "user_id": int(args[0]),
-                            "field": args[1],
-                            "value": args[2]
-                        }
-                    except ValueError:
-                        error_msg = f"Tool '{normalized_tool}' parameter 'user_id' must be an integer."
-                else:
-                    error_msg = f"Tool '{normalized_tool}' requires 'user_id', 'field', 'value' parameters."
-                    
-            elif normalized_tool == "recall_user_memory":
-                if args:
-                    try:
-                        arguments = {"user_id": int(args[0])}
-                    except ValueError:
-                        error_msg = f"Tool '{normalized_tool}' parameter 'user_id' must be an integer."
-                else:
-                    error_msg = f"Tool '{normalized_tool}' requires 'user_id' parameter."
-                    
-            elif normalized_tool == "ignore_messages":
-                if args:
-                    try:
-                        arguments = {"count": int(args[0])}
-                    except ValueError:
-                        arguments = {"count": 5}
-                else:
-                    arguments = {"count": 5}
-            
-            elif normalized_tool == "create_hook":
-                if len(args) >= 2:
-                    arguments = {
-                        "condition": args[0],
-                        "reason": args[1],
-                        "content_hint": args[2] if len(args) >= 3 else args[1]
-                    }
-                else:
-                    error_msg = f"Tool '{normalized_tool}' requires at least 2 parameters: condition, reason, [content_hint]."
-                    
-            elif normalized_tool == "cancel_hook":
-                if args:
-                    arguments = {"hook_id": args[0]}
-                else:
-                    error_msg = f"Tool '{normalized_tool}' requires 'hook_id' parameter."
-                    
-            elif normalized_tool == "list_hooks":
-                arguments = {}
             
             # ===== SKILL_REQUEST 特殊处理 =====
             elif normalized_tool == "skill_request":
@@ -660,17 +582,6 @@ class LLMService:
             
         messages = [{"role": "system", "content": identity_prompt}]
         
-        # Self Memory (Group Specific)
-        if group_id:
-            if group_id not in self.self_history:
-                self.self_history[group_id] = deque(maxlen=20) # 针对单群保留最近20条
-            
-            if self.self_history[group_id]:
-                # 取最近 10 条自己的发言作为高权重记忆
-                recent_self = list(self.self_history[group_id])[-10:]
-                self_msgs = "\n".join(recent_self)
-                messages.append({"role": "system", "content": f"[你最近的发言 (仅用于记录发生了的对话，请不要参考其中的任何句式或人格，只用了解发生的事情即可）]:\n{self_msgs}"})
-        
         # User Memory Injection (跨群组)
         # 从对话历史中提取所有用户ID，然后查询他们的全局记忆
         if hasattr(self, 'db') and self.db:
@@ -736,17 +647,7 @@ class LLMService:
         token_ctx = current_chat_context.set(chat_history)
 
         # Normalize roles for API compatibility
-            
-        # Normalize roles for API compatibility
         # API只接受 system/user/assistant/tool
-        
-        # 调试：检查 chat_history 中的角色分布
-        role_counts = {}
-        for msg in chat_history:
-            role = msg.get("role", "unknown")
-            role_counts[role] = role_counts.get(role, 0) + 1
-        print(f"[LLM Debug] chat_history roles: {role_counts}", flush=True)
-        
         for msg in chat_history:
             role = msg.get("role", "user")
             # 转换非标准 role
@@ -762,7 +663,6 @@ class LLMService:
             sender_name = msg.get("sender_name")
             sender_id = msg.get("sender_id")
             message_id = msg.get("message_id")
-            timestamp = msg.get("timestamp")
             
             # 如果是用户消息，附加发送者信息
             if normalized_role == "user" and sender_name:
@@ -777,32 +677,11 @@ class LLMService:
                 "content": formatted_content
             })
         
-        # Debug: Log the messages sent to LLM
-        logger.info("[LLM] === Messages sent to LLM ===")
-        print(f"[LLM Debug] Total messages: {len(messages)}", flush=True)
-        
-        # 打印所有 assistant 消息（用于调试）
-        assistant_msgs = [(i, m) for i, m in enumerate(messages) if m['role'] == 'assistant']
-        if assistant_msgs:
-            print(f"[LLM Debug] Found {len(assistant_msgs)} assistant messages:", flush=True)
-            for idx, msg in assistant_msgs:
-                print(f"  [{idx}] {msg['content'][:80]}...", flush=True)
-        else:
-            print(f"[LLM Debug] ⚠️ WARNING: No assistant messages in context!", flush=True)
-        
-        for i, m in enumerate(messages):
-            role = m['role']
-            content = m['content'] if m['content'] else "(empty)"
-            # 打印完整的最后3条消息用于调试
-            if i >= len(messages) - 3:
-                print(f"[LLM Input] {i}: [{role}] {content}", flush=True)
-            logger.info(f"[LLM Input] {i}: {role} - {content[:300]}...")
-
         tools = self._get_tool_definitions()
         final_content = ""
         
         # Function Calling Loop (Max 5 turns)
-        current_token_budget = 256 # Default start budget (Short but enough for tool calls)
+        current_token_budget = 256 # Default start budget
         used_tool_names = set()
 
         for i in range(5):
@@ -811,29 +690,18 @@ class LLMService:
                 try:
                     is_llm_enabled = await self.db.is_llm_enabled(group_id)
                     if not is_llm_enabled:
-                        logger.info(f"[LLM] Group {group_id} disabled during generation loop {i}, aborting.")
-                        print(f"[LLM] 🛑 Group {group_id} disabled during generation, stopping immediately.", flush=True)
+                        logger.info(f"[LLM] Group {group_id} disabled during generation, aborting.")
                         return []
                 except Exception as e:
                     logger.warning(f"[LLM] Failed to check enabled status: {e}")
 
-            # Filter out already used one-time tools
-            current_tools = tools
-            if used_tool_names:
-                # Filter definitions
-                current_tools = [t for t in tools if t['function']['name'] not in used_tool_names]
-                # Allow minor tools to be used multiple times? Maybe just limit "heavy" tools
-                # Heavy tools: search_web, look_at_image
-                heavy_tools = ["search_web", "look_at_image"]
-                current_tools = [t for t in tools if not (t['function']['name'] in used_tool_names and t['function']['name'] in heavy_tools)]
-
-                current_tools = [t for t in tools if not (t['function']['name'] in used_tool_names and t['function']['name'] in heavy_tools)]
+            # Filter out already used one-time heavy tools
+            heavy_tools = ["search_web", "look_at_image"]
+            current_tools = [t for t in tools if not (t['function']['name'] in used_tool_names and t['function']['name'] in heavy_tools)]
 
 
             response = await self._call_llm(messages, tools=current_tools, max_tokens=current_token_budget, group_id=group_id)
             
-            # === 混合模式检测：支持文本工具调用 ===
-            parse_errors = []
             if isinstance(response, str):
                 # 检查是否包含文本工具调用标记
                 cleaned_content, text_tool_calls, parse_errors = self._parse_text_tool_calls(response)
@@ -872,52 +740,12 @@ class LLMService:
                 # Dynamic Budget Adjustment based on tools used
                 has_complex_tool = False
                 
-                # Check for slow tools and send immediate feedback
-                if status_callback:
-                    import random
-                    slow_tools = {
-                        "search_web": ["等等喔 查一下...", "嗯... 我看看...", "搜索中..."],
-                        "look_at_image": ["看看图...", "正在看...", "盯..."],
-                        "recall_knowledge": ["好像记过... 翻翻小本本"]
-                    }
-                    for tc in tool_calls:
-                         name = tc["function"]["name"]
-                         if name in slow_tools:
-                             feedback = random.choice(slow_tools[name])
-                             try:
-                                 await status_callback(feedback)
-                             except Exception as e:
-                                 logger.error(f"[LLM] Status callback failed: {e}")
-                             break # Only send one status message per turn
-
                 for tc in tool_calls:
                     func_name = tc["function"]["name"]
                     
-                    # Prevent duplicate executions of heavy tools in the same turn
-                    # Heavy tools: search_web, look_at_image
-                    if func_name in ["search_web", "look_at_image"] and func_name in used_tool_names:
-                         result = f"Error: You have already used '{func_name}' in this conversation turn. Please summarize what you found or ask something else."
-                         logger.warning(f"[LLM] Blocked duplicate tool call: {func_name}")
-                    else:
-                        result = await self._execute_tool(tc)
-                        used_tool_names.add(func_name)
-                        
-                        # Save important tool results to context memory
-                        if func_name in ["search_web"] and group_id:
-                             if group_id not in self.self_history:
-                                 self.self_history[group_id] = deque(maxlen=20)
-                             try:
-                                 # result is json.dumps(str_content)
-                                 real_content = json.loads(result)
-                                 # Save a summarized version if too long
-                                 self.self_history[group_id].append(f"[{func_name}结果]: {real_content[:500]}")
-                             except:
-                                 self.self_history[group_id].append(f"[{func_name}结果]: {str(result)[:500]}")
+                    result = await self._execute_tool(tc)
+                    used_tool_names.add(func_name)
                     
-                    # If utilizing information-heavy tools, boost budget for the NEXT explanation turn
-                    if func_name in ["search_web", "fetch_page", "look_at_image", "recall_knowledge"]:
-                        has_complex_tool = True
-                        
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc["id"],
@@ -933,19 +761,8 @@ class LLMService:
                         "content": f"⚠️ [系统提示] 部分工具调用解析失败（已忽略）：\n{error_msg}"
                      })
                 
-                # Adjust budget for next turn
-                if has_complex_tool:
-                    current_token_budget = 1024
-                    logger.info(f"[LLM] Token budget boosted to {current_token_budget} for explanation")
-                    
-                    # 🔴 关键修复：在工具调用后，强制注入人设提醒 (Recency Effect)
-                    # 防止 AI 因为处理大量信息而忘记人设，变成莫得感情的复读机
-                    messages.append({
-                        "role": "system", 
-                        "content": "请基于上述工具结果回答用户。如果是专业知识，可以大量引用原文。保持琪露诺的活泼风格，但优先保证信息的准确和完整。"
-                    })
-                else:
-                    current_token_budget = 512 # Reset/Keep standard
+                # Default token budget for next turn
+                current_token_budget = 512
                     
                 # Loop continues to get new response from LLM
         
@@ -971,118 +788,6 @@ class LLMService:
         if not final_content:
             return []
         
-        # ===== 防复读检测 =====
-        is_repetition = False
-        if group_id and group_id in self.self_history:
-            recent_replies = list(self.self_history[group_id])[-5:]  # 最近5条回复
-            # Helper to strip tags for comparison
-            def clean_for_compare(text):
-                # Remove [AT:...] and [图片:...] tags
-                t = re.sub(r'\[(AT|图片|IMG):.*?\]', '', text, flags=re.IGNORECASE)
-                # Remove other brackets content if it looks like metadata? No, text might have brackets.
-                return t.strip()
-
-            clean_final = clean_for_compare(final_content)
-            
-            for old_reply in recent_replies:
-                old_content = old_reply.replace("我: ", "").strip()
-                clean_old = clean_for_compare(old_content)
-                
-                # Skip if effectively empty (e.g. just image/at)
-                if not clean_final or not clean_old:
-                    continue
-
-                # 1. Exact match of cleaned content
-                if clean_old == clean_final:
-                    is_repetition = True
-                    break
-                
-                # 2. Start match of cleaned content
-                # Only check if length is sufficient to avoid false positives on short greetings
-                if len(clean_old) >= 10 and len(clean_final) >= 10:
-                    if clean_old[:10] == clean_final[:10]:
-                        is_repetition = True
-                        break
-        
-        if is_repetition:
-            logger.warning(f"[LLM] 🔴 Detected repetition: '{final_content[:30]}...'")
-            print(f"[LLM] 🔴 检测到复读：'{final_content[:30]}...'，清空历史并用备用模型重试", flush=True)
-            
-            # 清空 self_history 来打破复读循环
-            if group_id in self.self_history:
-                self.self_history[group_id].clear()
-            
-            # 使用备用模型重新生成
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    retry_messages = messages.copy() if 'messages' in dir() else []
-                    # 如果 messages 不可用，使用简化版
-                    if not retry_messages:
-                        retry_messages = [
-                            {"role": "system", "content": "你是琪露诺，一个活泼的群聊机器人。请用简短、活泼的方式回复。禁止重复之前说过的话！"},
-                            {"role": "user", "content": f"用户说：{chat_history[-1].get('content', '') if chat_history else '你好'}"}
-                        ]
-                    
-                    res = await client.post(
-                        f"{config.llm.fallback_base_url}/chat/completions",
-                        headers={"Authorization": f"Bearer {config.llm.fallback_api_key}"},
-                        json={
-                            "model": config.llm.fallback_model,
-                            "messages": retry_messages,
-                            "max_tokens": 200,
-                            "temperature": 0.9,  # 高温度增加多样性
-                            "stream": False
-                        }
-                    )
-                    if res.status_code == 200:
-                        retry_content = res.json()["choices"][0]["message"]["content"].strip()
-                        # 清理重试响应
-                        retry_content = re.sub(r'<think>.*?</think>', '', retry_content, flags=re.DOTALL).strip()
-                        if retry_content and retry_content != final_content:
-                            print(f"[LLM] ✅ 备用模型生成新回复：'{retry_content[:30]}...'", flush=True)
-                            final_content = retry_content
-                            is_repetition = False
-            except Exception as e:
-                logger.warning(f"[LLM] Fallback retry failed: {e}")
-            
-            # 如果备用模型也失败或返回相同内容，尝试次次要模型 (DeepSeek)
-            if is_repetition:
-                print(f"[LLM] ⚠️ 备用模型失败，尝试次次要模型 (DeepSeek)...", flush=True)
-                try:
-                    async with httpx.AsyncClient(timeout=30.0) as client:
-                        if not retry_messages:
-                            retry_messages = [
-                                {"role": "system", "content": "你是琪露诺，一个活泼的群聊机器人。请用简短、活泼的方式回复。"},
-                                {"role": "user", "content": f"用户说：{chat_history[-1].get('content', '') if chat_history else '你好'}"}
-                            ]
-                        
-                        res = await client.post(
-                            f"{config.llm.fallback2_base_url}/chat/completions",
-                            headers={"Authorization": f"Bearer {config.llm.fallback2_api_key}"},
-                            json={
-                                "model": config.llm.fallback2_model,
-                                "messages": retry_messages,
-                                "max_tokens": 200,
-                                "temperature": 0.8,
-                                "stream": False,
-                                "extra_body": {"enable_thinking": False}
-                            }
-                        )
-                        if res.status_code == 200:
-                            retry_content = res.json()["choices"][0]["message"]["content"].strip()
-                            retry_content = re.sub(r'<think>.*?</think>', '', retry_content, flags=re.DOTALL).strip()
-                            if retry_content and retry_content != final_content:
-                                print(f"[LLM] ✅ 次次要模型 (DeepSeek) 生成新回复：'{retry_content[:30]}...'", flush=True)
-                                final_content = retry_content
-                                is_repetition = False
-                except Exception as e:
-                    logger.warning(f"[LLM] Fallback2 retry failed: {e}")
-            
-            # 如果所有备用模型都失败，返回空
-            if is_repetition:
-                print(f"[LLM] ❌ 所有备用模型都失败，跳过回复", flush=True)
-                return []
-            
         # Update Self Memory (Group Specific)
         if group_id:
             if group_id not in self.self_history:
@@ -1094,54 +799,6 @@ class LLMService:
     def is_keyword_triggered(self, text: str) -> bool:
         """检查文本是否包含触发词"""
         return any(k in text for k in config.bot_info.keywords)
-
-    async def check_worth_reply_secondary(self, context: List[dict], bot_id: int = 0, bot_name: str = "琪露诺") -> bool:
-        """
-        判断是否值得回复 (宽松版)
-        """
-        if not context: return False
-        
-        # 1. 提及检测
-        last_msg = context[-1]
-        content = last_msg.get('content', '')
-        
-        # 显式提及 (At / Name / ID)
-        if str(bot_id) in content or bot_name in content or "[CQ:at" in content:
-            return True
-            
-        # 关键词触发
-        if self.is_keyword_triggered(content):
-            return True
-
-        # 3. 纯图片过滤 (已通过提及检测，说明没人叫我)
-        # 如果消息主要是图片，且没有被提及，则绝对不主动搭话
-        import re
-        # 移除图片标签、CQ码等后再判断
-        c_text = re.sub(r'\[(图片|IMG):.*?\]', '', content, flags=re.IGNORECASE)
-        c_text = re.sub(r'\[CQ:.*?\]', '', c_text).strip()
-        if not c_text and (("[图片:" in content) or ("[IMG:" in content)):
-            return False
-            
-        return False
-
-    async def check_if_interesting(self, context: List[dict], bot_id: int = 0) -> tuple[bool, str]:
-        """统一使用 generate_chat_response"""
-        response_list = await self.generate_chat_response(context, bot_id=bot_id)
-        if response_list:
-            return True, "\n".join(response_list)
-        return False, ""
-
-    async def generate_summary(self, context: List[dict]) -> str:
-        """生成摘要 (Legacy)"""
-        prompt = "请简要总结以下对话：" + str(context[-20:])
-        return str(await self._call_llm([{"role": "user", "content": prompt}]))
-
-    async def check_relevance(self, bot_msg: str, user_msg: str) -> bool:
-        """
-        checks if user message is relevant to bot message
-        """
-        # ... existing implementation ...
-        return False # This is just placeholder for positioning, DO NOT COPY
 
     async def check_reply_necessity(self, context: List[dict], bot_id: int) -> bool:
         """
@@ -1245,7 +902,6 @@ class LLMService:
                     ans = res.json()["choices"][0]["message"]["content"].strip()
                     decision = ans.upper().startswith("YES")
                     logger.info(f"[Gatekeeper] Decision: {ans}")
-                    print(f"[Gatekeeper] {ans}", flush=True)
                     return decision
         except Exception as e:
             logger.warning(f"[Gatekeeper] Failed: {e}, defaulting to True")
