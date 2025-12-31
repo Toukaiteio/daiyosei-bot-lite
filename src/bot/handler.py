@@ -1,9 +1,5 @@
 """
 消息处理器 - 处理群聊对话逻辑
-
-重构日志:
-- 2024/12: 添加消息聚合器 (MessageAggregator) 支持批量消息处理
-- 2024/12: 添加私聊管理器 (PrivateChatManager) 支持主动私聊
 """
 import re
 import time

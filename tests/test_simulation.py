@@ -28,10 +28,17 @@ async def test_bot_response_flow():
         mock_create.return_value = mock_llm_response
         
         from src.ai.llm_service import LLMService
-        from src.config import config
+        from src.config import config, ModelProvider
         
         # Setup config for testing
-        config.llm.api_key = "test_key"
+        config.llm.text_candidates = [
+            ModelProvider(
+                provider="openai",
+                base_url="https://api.openai.com/v1",
+                api_keys=["test_key"],
+                model="gpt-4o"
+            )
+        ]
         
         service = LLMService()
         await service.set_db(mock_db)
